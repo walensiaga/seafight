@@ -1,0 +1,261 @@
+import pygame
+import socket
+
+pygame.init()
+WIDTH, HEIGHT = 1000, 550
+CELL_SIZE = 40
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Морський бій")
+
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+BLUE = (0, 0, 255)
+RED = (255, 0, 0)
+ORANGE = (255, 165, 0)  # Колір для поранених кораблів
+GRAY = (200, 200, 200)
+GREEN = (0, 255, 0)
+YELLOW = (255, 255, 0)
+
+my_board = [[0 for _ in range(10)] for _ in range(10)]
+enemy_board = [[0 for _ in range(10)] for _ in range(10)]
+ships = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1]
+placing = True
+current_ship = 0
+horizontal = True
+preview_pos = None
+last_shot = None  # Зберігаємо координати останнього пострілу
+
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect(('25.49.115.241', 993))
+client.setblocking(False)
+my_turn = False
+player_id = None
+game_message = "Розставляйте кораблі"
+
+font = pygame.font.SysFont('arial', 30)
+
+def draw_grid(board, offset_x, offset_y, show_ships=True):
+    word = "РЕСПУБЛІКА"
+    for i in range(10):
+        letter = font.render(word[i], True, BLACK)
+        screen.blit(letter, (offset_x + i * CELL_SIZE + 10, offset_y - 40))
+
+    for i in range(10):
+        num = font.render(str(i + 1), True, BLACK)
+        if i + 1 == 10:
+            screen.blit(num, (offset_x - 40, offset_y + i * CELL_SIZE + 5))
+        else:
+            screen.blit(num, (offset_x - 30, offset_y + i * CELL_SIZE + 5))
+
+    for x in range(10):
+        for y in range(10):
+            rect = pygame.Rect(offset_x + x * CELL_SIZE, offset_y + y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+            pygame.draw.rect(screen, BLACK, rect, 1)
+            if board[y][x] == 1 and show_ships:
+                pygame.draw.rect(screen, BLUE, rect)
+            elif board[y][x] == 2:
+                # Поранений корабель — оранжевий хрестик
+                pygame.draw.line(screen, ORANGE, (rect.topleft), (rect.bottomright), 2)
+                pygame.draw.line(screen, ORANGE, (rect.topright), (rect.bottomleft), 2)
+            elif board[y][x] == 3:
+                # Знищений корабель — червоний
+                pygame.draw.rect(screen, RED, rect)
+            elif board[y][x] == 4:
+                pygame.draw.circle(screen, BLACK, rect.center, 5)
+
+def draw_preview(offset_x, offset_y):
+    if preview_pos is None or current_ship >= len(ships):
+        return
+    x, y = preview_pos
+    size = ships[current_ship]
+    can_place = can_place_ship(my_board, x, y, size, horizontal)
+    color = GREEN if can_place else RED
+
+    if horizontal:
+        for i in range(size):
+            if x + i < 10:
+                rect = pygame.Rect(offset_x + (x + i) * CELL_SIZE, offset_y + y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                pygame.draw.rect(screen, color, rect, 3)
+    else:
+        for i in range(size):
+            if y + i < 10:
+                rect = pygame.Rect(offset_x + x * CELL_SIZE, offset_y + (y + i) * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                pygame.draw.rect(screen, color, rect, 3)
+
+def can_place_ship(board, x, y, size, horizontal):
+    if horizontal:
+        if x + size > 10:
+            return False
+        for i in range(max(0, x - 1), min(10, x + size + 1)):
+            for j in range(max(0, y - 1), min(10, y + 2)):
+                if board[j][i] != 0:
+                    return False
+    else:
+        if y + size > 10:
+            return False
+        for i in range(max(0, x - 1), min(10, x + 2)):
+            for j in range(max(0, y - 1), min(10, y + size + 1)):
+                if board[j][i] != 0:
+                    return False
+    return True
+
+def place_ship(board, x, y, size, horizontal):
+    if horizontal:
+        for i in range(size):
+            board[y][x + i] = 1
+    else:
+        for i in range(size):
+            board[y + i][x] = 1
+
+def mark_destroyed(board, x, y):
+    ship_cells = [(x, y)]
+    directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    for dx, dy in directions:
+        nx, ny = x + dx, y + dy
+        while 0 <= nx < 10 and 0 <= ny < 10 and (board[ny][nx] == 1 or board[ny][nx] == 2):
+            ship_cells.append((nx, ny))
+            nx += dx
+            ny += dy
+
+    for sx, sy in ship_cells:
+        board[sy][sx] = 3
+
+    for sx, sy in ship_cells:
+        for dx in range(-1, 2):
+            for dy in range(-1, 2):
+                nx, ny = sx + dx, sy + dy
+                if 0 <= nx < 10 and 0 <= ny < 10 and board[ny][nx] == 0:
+                    board[ny][nx] = 4
+
+def check_hit(x, y):
+    if my_board[y][x] == 1 or my_board[y][x] == 2:
+        my_board[y][x] = 2
+        ship_destroyed = True
+        directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+        for dx, dy in directions:
+            nx, ny = x + dx, y + dy
+            while 0 <= nx < 10 and 0 <= ny < 10:
+                if my_board[ny][nx] == 1:
+                    ship_destroyed = False
+                    break
+                if my_board[ny][nx] != 2 and my_board[ny][nx] != 1:
+                    break
+                nx += dx
+                ny += dy
+        if ship_destroyed:
+            mark_destroyed(my_board, x, y)
+            if all(cell != 1 and cell != 2 for row in my_board for cell in row):
+                return "GAME_OVER"
+            return "KILLED"
+        return "HIT"
+    else:
+        my_board[y][x] = 4
+        return "MISS"
+
+def check_game_over():
+    enemy_ships_destroyed = sum(row.count(3) for row in enemy_board)
+    total_ship_cells = sum(ships)
+    return enemy_ships_destroyed == total_ship_cells
+
+def handle_network():
+    global my_turn, game_message, placing
+    try:
+        message = client.recv(1024).decode()
+        if message.startswith("PLAYER:"):
+            global player_id
+            player_id = int(message[7:])
+            game_message = f"Ви гравець {player_id + 1}. Розставляйте кораблі"
+        elif message == "YOUR_TURN":
+            my_turn = True
+            game_message = "Ваш хід!"
+        elif message == "WAIT":
+            my_turn = False
+            game_message = "Хід суперника..."
+        elif message.startswith("SHOT:"):
+            x, y = map(int, message[5:].split())
+            result = check_hit(x, y)
+            client.send(f"RESULT:{result}".encode())
+            if result == "GAME_OVER":
+                game_message = "Ви програли! Гра закінчена."
+                my_turn = False
+        elif message.startswith("OUTCOME:"):
+            result = message[8:]
+            if last_shot is not None:  # Використовуємо збережені координати пострілу
+                x, y = last_shot
+                if result == "MISS":
+                    enemy_board[y][x] = 4  # Промах — крапка
+                elif result in ["HIT", "KILLED"]:
+                    enemy_board[y][x] = 2  # Влучання — поранений
+                    if result == "KILLED":
+                        mark_destroyed(enemy_board, x, y)  # Знищений корабель
+                    if check_game_over():
+                        game_message = "Ви перемогли! Гра закінчена."
+                        my_turn = False
+    except BlockingIOError:
+        pass
+
+running = True
+clock = pygame.time.Clock()
+
+while running:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            x, y = event.pos
+            if placing:
+                x = (x - 50) // CELL_SIZE
+                y = (y - 50) // CELL_SIZE
+                if 0 <= x < 10 and 0 <= y < 10:
+                    if preview_pos is None:
+                        preview_pos = (x, y)
+            elif not placing and my_turn:
+                x = (x - 550) // CELL_SIZE
+                y = (y - 50) // CELL_SIZE
+                if 0 <= x < 10 and 0 <= y < 10 and enemy_board[y][x] == 0:
+                    last_shot = (x, y)  # Зберігаємо координати пострілу
+                    client.send(f"MOVE:{x} {y}".encode())
+                    my_turn = False
+                    game_message = "Хід суперника..."
+        elif event.type == pygame.KEYDOWN and placing and preview_pos is not None:
+            x, y = preview_pos
+            if event.key == pygame.K_r:
+                horizontal = not horizontal
+                game_message = f"Розставляйте кораблі ({'горизонтально' if horizontal else 'вертикально'})"
+            elif event.key == pygame.K_LEFT:
+                if x > 0:
+                    preview_pos = (x - 1, y)
+            elif event.key == pygame.K_RIGHT:
+                if horizontal and x + ships[current_ship] < 10 or not horizontal and x < 9:
+                    preview_pos = (x + 1, y)
+            elif event.key == pygame.K_UP:
+                if y > 0:
+                    preview_pos = (x, y - 1)
+            elif event.key == pygame.K_DOWN:
+                if not horizontal and y + ships[current_ship] < 10 or horizontal and y < 9:
+                    preview_pos = (x, y + 1)
+            elif event.key == pygame.K_e:
+                if can_place_ship(my_board, x, y, ships[current_ship], horizontal):
+                    place_ship(my_board, x, y, ships[current_ship], horizontal)
+                    current_ship += 1
+                    preview_pos = None
+                    if current_ship >= len(ships):
+                        placing = False
+                        client.send("READY".encode())
+                        game_message = "Чекаємо суперника..."
+
+    handle_network()
+
+    screen.fill(WHITE)
+    draw_grid(my_board, 50, 50)
+    draw_grid(enemy_board, 550, 50, show_ships=False)
+    draw_preview(50, 50)
+
+    message_label = font.render(game_message, True, GREEN if my_turn else BLACK)
+    screen.blit(message_label, (50, HEIGHT - 40))
+
+    pygame.display.flip()
+    clock.tick(60)
+
+pygame.quit()
+client.close()
