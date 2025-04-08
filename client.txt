@@ -23,7 +23,6 @@ placing = True
 current_ship = 0
 horizontal = True
 preview_pos = None
-last_shot = None
 
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect(('25.49.115.241', 993))
@@ -54,11 +53,11 @@ def draw_grid(board, offset_x, offset_y, show_ships=True):
             if board[y][x] == 1 and show_ships:
                 pygame.draw.rect(screen, BLUE, rect)
             elif board[y][x] == 2:
-                pygame.draw.rect(screen, ORANGE, rect)  # Поранений — оранжевий квадрат
+                pygame.draw.rect(screen, ORANGE, rect)
             elif board[y][x] == 3:
-                pygame.draw.rect(screen, RED, rect)  # Знищений — червоний квадрат
+                pygame.draw.rect(screen, RED, rect)
             elif board[y][x] == 4:
-                pygame.draw.rect(screen, BLACK, rect)  # Промах — чорний квадрат
+                pygame.draw.rect(screen, BLACK, rect)
 
 def draw_preview(offset_x, offset_y):
     if preview_pos is None or current_ship >= len(ships):
@@ -122,7 +121,7 @@ def mark_destroyed(board, x, y):
             for dy in range(-1, 2):
                 nx, ny = sx + dx, sy + dy
                 if 0 <= nx < 10 and 0 <= ny < 10 and board[ny][nx] == 0:
-                    board[ny][nx] = 4  # Навколо знищеного корабля — чорні квадрати
+                    board[ny][nx] = 4
 
 def check_hit(x, y):
     if my_board[y][x] == 1 or my_board[y][x] == 2:
@@ -179,18 +178,15 @@ def handle_network():
             result = check_hit(x, y)
             client.send(f"RESULT:{result}".encode())
         elif message.startswith("OUTCOME:"):
-            result = message[8:]
-            if last_shot is not None:
-                x, y = last_shot
-                if result == "MISS":
-                    enemy_board[y][x] = 4  # Промах — чорний квадрат
-                elif result in ["HIT", "KILLED"]:
-                    enemy_board[y][x] = 2  # Влучання — оранжевий квадрат
-                    if result == "KILLED":
-                        mark_destroyed(enemy_board, x, y)  # Знищений — червоний квадрат
-                    if check_game_over():
-                        game_message = "Ви перемогли! Гра закінчена."
-                        my_turn = False
+            parts = message.split(":")
+            result = parts[1]
+            x, y = int(parts[2]), int(parts[3])
+            enemy_board[y][x] = 4 if result == "MISS" else 2  # Промах — чорний, влучання — оранжевий
+            if result == "KILLED":
+                mark_destroyed(enemy_board, x, y)  # Знищений — червоний
+            if check_game_over():
+                game_message = "Ви перемогли! Гра закінчена."
+                my_turn = False
     except BlockingIOError:
         pass
 
@@ -213,10 +209,7 @@ while running:
                 x = (x - 550) // CELL_SIZE
                 y = (y - 50) // CELL_SIZE
                 if 0 <= x < 10 and 0 <= y < 10 and enemy_board[y][x] == 0:
-                    last_shot = (x, y)
                     client.send(f"MOVE:{x} {y}".encode())
-                    my_turn = False
-                    game_message = "Хід суперника..."
         elif event.type == pygame.KEYDOWN and placing and preview_pos is not None:
             x, y = preview_pos
             if event.key == pygame.K_r:
