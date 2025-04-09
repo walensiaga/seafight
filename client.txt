@@ -19,7 +19,7 @@ YELLOW = (255, 255, 0)
 
 my_board = [[0 for _ in range(10)] for _ in range(10)]
 enemy_board = [[0 for _ in range(10)] for _ in range(10)]
-cheat_board = [[0 for _ in range(10)] for _ in range(10)]  # Окрема дошка для читерського відображення
+cheat_board = [[0 for _ in range(10)] for _ in range(10)]
 ships = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1]
 
 placing = True
@@ -31,7 +31,7 @@ player_id = None
 game_message = "Розставляйте кораблі"
 message_buffer = []
 game_over = False
-cheating = False  # Прапорець для активації чита
+cheating = False
 
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect(('25.49.115.241', 993))  # Заміни на IP сервера з Hamachi
