@@ -6,7 +6,7 @@ pygame.init()
 WIDTH, HEIGHT = 1000, 550
 CELL_SIZE = 40
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Морський бій - Мережева гра")
+pygame.display.set_caption("Морський бій - v2.4")
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
@@ -34,7 +34,7 @@ game_over = False
 cheating = False  # Прапорець для активації чита
 
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect(('25.x.x.x', 993))  # Заміни на IP сервера з Hamachi
+client.connect(('25.49.115.241', 993))  # Заміни на IP сервера з Hamachi
 client.setblocking(False)
 
 font = pygame.font.SysFont('arial', 30)
