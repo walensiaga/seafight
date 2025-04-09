@@ -6,7 +6,7 @@ pygame.init()
 WIDTH, HEIGHT = 1000, 550
 CELL_SIZE = 40
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Морський бій - v2.3")
+pygame.display.set_caption("Морський бій - Мережева гра")
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
@@ -19,6 +19,7 @@ YELLOW = (255, 255, 0)
 
 my_board = [[0 for _ in range(10)] for _ in range(10)]
 enemy_board = [[0 for _ in range(10)] for _ in range(10)]
+cheat_board = [[0 for _ in range(10)] for _ in range(10)]  # Окрема дошка для читерського відображення
 ships = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1]
 
 placing = True
@@ -29,19 +30,21 @@ my_turn = False
 player_id = None
 game_message = "Розставляйте кораблі"
 message_buffer = []
-game_over = False  # Додаємо змінну для стану закінчення гри
+game_over = False
+cheating = False  # Прапорець для активації чита
 
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect(('25.49.115.241', 993))  # Заміни на IP сервера з Hamachi
+client.connect(('25.x.x.x', 993))  # Заміни на IP сервера з Hamachi
 client.setblocking(False)
 
 font = pygame.font.SysFont('arial', 30)
 button_font = pygame.font.SysFont('arial', 40)
 
 def reset_game():
-    global my_board, enemy_board, placing, current_ship, preview_pos, my_turn, game_message, game_over
+    global my_board, enemy_board, cheat_board, placing, current_ship, preview_pos, my_turn, game_message, game_over, cheating
     my_board = [[0 for _ in range(10)] for _ in range(10)]
     enemy_board = [[0 for _ in range(10)] for _ in range(10)]
+    cheat_board = [[0 for _ in range(10)] for _ in range(10)]
     placing = True
     current_ship = 0
     horizontal = True
@@ -49,6 +52,7 @@ def reset_game():
     my_turn = False
     game_message = "Розставляйте кораблі"
     game_over = False
+    cheating = False
 
 def draw_grid(board, offset_x, offset_y, show_ships=True):
     word = "РЕСПУБЛІКА"
@@ -75,6 +79,14 @@ def draw_grid(board, offset_x, offset_y, show_ships=True):
                 pygame.draw.rect(screen, RED, rect)
             elif board[y][x] == 4:
                 pygame.draw.rect(screen, BLACK, rect)
+
+def draw_cheat_board(offset_x, offset_y):
+    if cheating:
+        for x in range(10):
+            for y in range(10):
+                rect = pygame.Rect(offset_x + x * CELL_SIZE, offset_y + y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                if cheat_board[y][x] == 1:  # Показуємо живі кораблі противника
+                    pygame.draw.rect(screen, YELLOW, rect)  # Жовтий для читерських кораблів
 
 def draw_preview(offset_x, offset_y):
     if preview_pos is None or current_ship >= len(ships):
@@ -193,7 +205,7 @@ def draw_restart_button():
     return button_rect
 
 def handle_network():
-    global my_turn, game_message, placing, player_id, game_over
+    global my_turn, game_message, placing, player_id, game_over, cheating, cheat_board
     try:
         while True:
             message = client.recv(1024).decode()
@@ -249,9 +261,21 @@ def handle_network():
                 print(f"Помилка обробки OUTCOME: {e}, повідомлення: {message}")
         elif message == "RESTART":
             reset_game()
+        elif message == "GET_BOARD":  # Відправляємо свою дошку для чита
+            board_str = ""
+            for row in my_board:
+                board_str += " ".join(map(str, row)) + ";"
+            client.send(f"BOARD:{board_str[:-1]}\n".encode())
+        elif message.startswith("BOARD:"):  # Отримуємо дошку противника
+            cheating = True
+            board_data = message[6:].split(";")
+            for y, row in enumerate(board_data):
+                cheat_board[y] = list(map(int, row.split()))
 
 running = True
 clock = pygame.time.Clock()
+f3_pressed = False
+f4_pressed = False
 
 while running:
     for event in pygame.event.get():
@@ -271,18 +295,22 @@ while running:
                     client.send(f"MOVE:{grid_x} {grid_y}\n".encode())
                     my_turn = False
                     game_message = "Чекаємо відповідь..."
-            elif game_over:  # Перевірка натискання кнопки "Реванш"
+            elif game_over:
                 restart_button = draw_restart_button()
                 if restart_button.collidepoint(x, y):
                     client.send("RESTART\n".encode())
-        elif event.type == pygame.KEYDOWN and placing:
-            if event.key == pygame.K_f:
-                random_place_ships(my_board, ships)
-                client.send("READY\n".encode())
-                game_message = "Чекаємо суперника..."
-            elif preview_pos is not None:
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_F3:
+                f3_pressed = True
+            elif event.key == pygame.K_F4:
+                f4_pressed = True
+            elif placing and preview_pos is not None:
                 x, y = preview_pos
-                if event.key == pygame.K_r:
+                if event.key == pygame.K_f:
+                    random_place_ships(my_board, ships)
+                    client.send("READY\n".encode())
+                    game_message = "Чекаємо суперника..."
+                elif event.key == pygame.K_r:
                     horizontal = not horizontal
                     game_message = f"Розставляйте кораблі ({'горизонтально' if horizontal else 'вертикально'})"
                 elif event.key == pygame.K_LEFT and x > 0:
@@ -302,19 +330,31 @@ while running:
                             placing = False
                             client.send("READY\n".encode())
                             game_message = "Чекаємо суперника..."
+        elif event.type == pygame.KEYUP:
+            if event.key == pygame.K_F3:
+                f3_pressed = False
+            elif event.key == pygame.K_F4:
+                f4_pressed = False
+
+    # Перевірка комбінації F3 + F4 для активації чита
+    if f3_pressed and f4_pressed and not placing and not game_over:
+        client.send("CHEAT\n".encode())
+        f3_pressed = False  # Скидаємо, щоб не спамити запитами
+        f4_pressed = False
 
     handle_network()
 
     screen.fill(WHITE)
     draw_grid(my_board, 50, 50)
     draw_grid(enemy_board, 550, 50, show_ships=False)
+    draw_cheat_board(550, 50)  # Додаємо читерське відображення поверх enemy_board
     if placing and current_ship < len(ships):
         draw_preview(50, 50)
 
     message_label = font.render(game_message, True, GREEN if my_turn else BLACK)
     screen.blit(message_label, (50, HEIGHT - 40))
 
-    if game_over:  # Малюємо кнопку "Реванш" після закінчення гри
+    if game_over:
         draw_restart_button()
 
     pygame.display.flip()
